@@ -86,14 +86,8 @@ export function Home({ onStartEntry, onNavigate, entries, onUpdateEntry }: HomeP
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="min-h-screen px-5 pt-4 pb-6"
     >
-      {/* Header: Streak (left) | Ink Logo (center) | Profile (right) */}
-      <div className="relative flex items-center justify-between mb-16 h-12">
-        {/* Streak - Top Left */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-xl grayscale">🔥</span>
-          <span className="text-[17px] font-semibold text-[#171717]">{streak}</span>
-        </div>
-
+      {/* Header: Ink Logo (center) | Profile (right) */}
+      <div className="relative flex items-center mb-16 h-12">
         {/* Ink Logo - Centered */}
         <div className="absolute left-1/2 -translate-x-1/2">
           <h1 className="text-[20px] font-semibold text-[#171717]">Ink</h1>
@@ -102,7 +96,7 @@ export function Home({ onStartEntry, onNavigate, entries, onUpdateEntry }: HomeP
         {/* Profile Icon - Top Right */}
         <button 
           onClick={() => onNavigate('profile')}
-          className="w-9 h-9 rounded-full bg-[#F5F5F4] border border-[#E5E5E5] flex items-center justify-center hover:bg-[#E5E5E5] transition-colors"
+          className="absolute right-0 top-0 w-9 h-9 rounded-full bg-[#F5F5F4] border border-[#E5E5E5] flex items-center justify-center hover:bg-[#E5E5E5] transition-colors"
         >
           <User className="w-5 h-5 text-[#525252]" strokeWidth={2} />
         </button>
@@ -130,18 +124,6 @@ export function Home({ onStartEntry, onNavigate, entries, onUpdateEntry }: HomeP
           Write about today
         </motion.button>
       </div>
-
-      {/* Status */}
-      {lastEntry && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2, duration: 0.3 }}
-          className="text-center mb-8 text-[15px] text-[#525252]"
-        >
-          Last: {getTimeSince()}
-        </motion.div>
-      )}
 
       {/* Empty State Message */}
       {entries.length === 0 && (

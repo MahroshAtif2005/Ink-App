@@ -13,7 +13,7 @@ import { OPENAI_MODEL } from './src/backend/utils/ai';
 
 const prisma = new PrismaClient();
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 const openaiKey = process.env.OPENAI_API_KEY || '';
 
 console.log('OPENAI_KEY_PRESENT:', !!openaiKey, 'OPENAI_KEY_PREFIX:', openaiKey ? openaiKey.slice(0, 3) : '');

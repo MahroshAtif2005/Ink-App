@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown, Repeat, BarChart3, Hash, Calendar as CalendarIcon } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { JournalEntry } from '../App';
 
 interface InsightsProps {
@@ -12,13 +12,12 @@ interface AIResponse {
   weeklySummary?: string;
   moodDrivers?: string[];
   patterns?: string[];
-  notableMoments?: Array<{ moment: string; whyItMatters: string }>;
-  suggestions?: string[];
   confidence?: number;
   sourceEntryCount?: number;
   range?: { days: number };
   error?: string;
   isFallback?: boolean;
+  futureYouMessage?: string;
 }
 
 export function Insights({ entries }: InsightsProps) {
@@ -26,6 +25,11 @@ export function Insights({ entries }: InsightsProps) {
   const [howYouFeltText, setHowYouFeltText] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [showFutureYouSection, setShowFutureYouSection] = useState(false);
+  const [futureYouContent, setFutureYouContent] = useState<string | null>(null);
+  const [isLoadingFutureYou, setIsLoadingFutureYou] = useState(false);
+  const [futureYouError, setFutureYouError] = useState<string | null>(null);
+  const futureYouSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     // Load cached insight (if fresh)
@@ -53,7 +57,7 @@ export function Insights({ entries }: InsightsProps) {
 
     try {
       const apiBase = (import.meta as any)?.env?.VITE_API_BASE_URL || '';
-      const apiUrl = apiBase ? `${apiBase}/insights/ai/last7?force=true` : '/api/insights/ai/last7?force=true';
+      const apiUrl = apiBase ? `${apiBase}/insights/ai` : '/api/insights/ai';
       console.log('[Insights] AI request sent to', apiUrl);
       
       const headers: Record<string,string> = { 'Content-Type': 'application/json' };
@@ -68,7 +72,7 @@ export function Insights({ entries }: InsightsProps) {
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ entries: payloadEntries }),
+        body: JSON.stringify({ entries: payloadEntries, mode: 'weekly', force: true }),
       });
       console.log('[Insights] AI response received, status:', response.status);
 
@@ -97,14 +101,13 @@ export function Insights({ entries }: InsightsProps) {
             weeklySummary: normalized?.weeklySummary ?? '',
             moodDrivers: Array.isArray(normalized?.moodDrivers) ? normalized.moodDrivers : [],
             patterns: Array.isArray(normalized?.patterns) ? normalized.patterns : [],
-            suggestions: Array.isArray(normalized?.suggestions) ? normalized.suggestions : [],
             confidence: typeof normalized?.confidence === 'number' ? normalized.confidence : 0.4,
             sourceEntryCount: typeof normalized?.sourceEntryCount === 'number' ? normalized.sourceEntryCount : undefined,
             isFallback: typeof normalized?.isFallback === 'boolean' ? normalized.isFallback : undefined,
           }
         : null;
 
-      if (normalizedData) {
+      if (normalizedData && response.ok && !data?.error) {
         setAiData(normalizedData);
         setHowYouFeltText(normalizedData.howYouFelt);
         setGenerateError(null);
@@ -116,7 +119,11 @@ export function Insights({ entries }: InsightsProps) {
       } else {
         setAiData(null);
         setHowYouFeltText('');
-        setGenerateError('Couldn’t generate insights right now. Try again.');
+        if (!response.ok) {
+          setGenerateError('Couldn’t generate insights right now. Try again.');
+        } else {
+          setGenerateError(null);
+        }
       }
 
       // If backend reports zero entries but there are local entries, retry by posting them
@@ -129,7 +136,7 @@ export function Insights({ entries }: InsightsProps) {
             moodEmoji: e.mood,
           }));
           console.log('[Insights] No backend entries; retrying with localStorage entries, count=', payloadEntries.length);
-          const retryResp = await fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify({ entries: payloadEntries }) });
+          const retryResp = await fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify({ entries: payloadEntries, mode: 'weekly', force: true }) });
           if (retryResp.ok) {
             const retryData = await retryResp.json();
             console.log('[Insights] Retry AI response:', retryData);
@@ -145,7 +152,6 @@ export function Insights({ entries }: InsightsProps) {
                   weeklySummary: retryNormalized?.weeklySummary ?? '',
                   moodDrivers: Array.isArray(retryNormalized?.moodDrivers) ? retryNormalized.moodDrivers : [],
                   patterns: Array.isArray(retryNormalized?.patterns) ? retryNormalized.patterns : [],
-                  suggestions: Array.isArray(retryNormalized?.suggestions) ? retryNormalized.suggestions : [],
                   confidence: typeof retryNormalized?.confidence === 'number' ? retryNormalized.confidence : 0.4,
                   sourceEntryCount: typeof retryNormalized?.sourceEntryCount === 'number' ? retryNormalized.sourceEntryCount : undefined,
                   isFallback: typeof retryNormalized?.isFallback === 'boolean' ? retryNormalized.isFallback : undefined,
@@ -241,6 +247,64 @@ export function Insights({ entries }: InsightsProps) {
     weekAgo.setDate(weekAgo.getDate() - 7);
     return e.date >= weekAgo;
   });
+
+  const isNegativeAvg = ['sad', 'anxious', 'stressed'].includes(dominantMood || '');
+
+  useEffect(() => {
+    if (isNegativeAvg) {
+      setShowFutureYouSection(true);
+    }
+  }, [isNegativeAvg]);
+
+  const handleAvgMoodClick = () => {
+    setShowFutureYouSection(true);
+    setTimeout(() => {
+      futureYouSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  };
+
+  const fetchFutureYou = async () => {
+    const token = localStorage.getItem('authToken');
+    console.log('[FutureYouToast] Generate clicked');
+    setIsLoadingFutureYou(true);
+    setFutureYouError(null);
+    try {
+      const apiBase = (import.meta as any)?.env?.VITE_API_BASE_URL || '';
+      const apiUrl = apiBase ? `${apiBase}/insights/ai` : '/api/insights/ai';
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      console.log('[FutureYouToast] API called');
+      const payloadEntries = entries.map((e) => ({
+        createdAt: e.date.toISOString(),
+        content: e.content,
+        mood: e.mood,
+        moodEmoji: e.mood,
+      }));
+      const response = await fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify({ entries: payloadEntries, mode: 'future_you', force: true }) });
+      const data = await response.json();
+      const futureText = typeof data?.futureYouMessage === 'string' ? data.futureYouMessage : '';
+      if (response.ok && futureText) {
+        console.log('[FutureYouToast] API success');
+        setFutureYouContent(futureText);
+        setShowFutureYouSection(true);
+      } else {
+        console.log('[FutureYouToast] API failure');
+        setFutureYouContent(null);
+        setFutureYouError('Couldn’t generate right now. Try again later.');
+      }
+    } catch (err) {
+      console.log('[FutureYouToast] API failure');
+      setFutureYouContent(null);
+      setFutureYouError('Couldn’t generate right now. Try again later.');
+    } finally {
+      setIsLoadingFutureYou(false);
+    }
+  };
+
+  const collapseFutureYouSection = () => {
+    setShowFutureYouSection(false);
+    setFutureYouError(null);
+  };
 
   const prevWeekEntries = entries.filter((e) => {
     const twoWeeksAgo = new Date();
@@ -363,10 +427,13 @@ export function Insights({ entries }: InsightsProps) {
             <div className="flex items-center gap-2">
               <span className="text-[15px] font-semibold text-[#171717]">{weekEntries.length} entries</span>
             </div>
-            <div className="flex items-center gap-2">
+            <button
+              onClick={handleAvgMoodClick}
+              className="flex items-center gap-2 text-left active:opacity-70 transition-opacity"
+            >
               <span className="text-[15px] text-[#525252]">Avg mood:</span>
               <span className="text-xl">{dominantMood ? getMoodEmoji(dominantMood) : '😐'}</span>
-            </div>
+            </button>
             <div className="text-[15px] text-[#525252]">
               Most written: <span className="font-semibold text-[#171717]">{mostCommonDay} evenings</span>
             </div>
@@ -401,22 +468,20 @@ export function Insights({ entries }: InsightsProps) {
                 )}
                 {aiData?.moodDrivers && aiData.moodDrivers.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-[#E5E5E5]">
-                    <p className="text-[14px] font-semibold text-[#171717] mb-2">Key Drivers:</p>
-                    <div className="flex flex-wrap gap-2">
+                    <p className="text-[14px] font-semibold text-[#171717] mb-2">Mood Drivers</p>
+                    <ul className="space-y-1">
                       {aiData.moodDrivers.map((driver, idx) => (
-                        <span key={idx} className="text-[13px] bg-[#E5E5E5] text-[#171717] px-3 py-1 rounded-full">
-                          {driver}
-                        </span>
+                        <li key={idx} className="text-[14px] text-[#525252]">• {driver}</li>
                       ))}
-                    </div>
+                    </ul>
                   </div>
                 )}
-                {aiData?.suggestions && Array.isArray(aiData.suggestions) && aiData.suggestions.some((s: any) => s) && (
+                {aiData?.patterns && aiData.patterns.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-[#E5E5E5]">
-                    <p className="text-[14px] font-semibold text-[#171717] mb-2">Suggestions:</p>
+                    <p className="text-[14px] font-semibold text-[#171717] mb-2">Patterns</p>
                     <ul className="space-y-1">
-                      {aiData.suggestions.filter((s: any) => s).map((suggestion: any, idx: any) => (
-                        <li key={idx} className="text-[14px] text-[#525252]">• {suggestion}</li>
+                      {aiData.patterns.map((pattern, idx) => (
+                        <li key={idx} className="text-[14px] text-[#525252]">• {pattern}</li>
                       ))}
                     </ul>
                   </div>
@@ -576,6 +641,52 @@ export function Insights({ entries }: InsightsProps) {
             Explore
           </button>
         </motion.div>
+
+        {/* Future You (6 months later) */}
+        {showFutureYouSection && (
+          <motion.div
+            ref={futureYouSectionRef}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="bg-white border border-[#E5E5E5] rounded-[10px] p-4"
+          >
+            <h3 className="text-[17px] font-semibold mb-3 text-[#171717]">Future You (6 months later)</h3>
+            {futureYouContent ? (
+              <div className="space-y-2">
+                {futureYouContent.split('\n').map((line, idx) => (
+                  <p key={idx} className="text-[14px] text-[#525252] leading-relaxed">
+                    {line}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-[14px] text-[#525252]">
+                  Want a perspective shift written in your voice, from six months ahead?
+                </p>
+                {futureYouError && (
+                  <p className="text-[13px] text-[#B91C1C]">Couldn’t generate right now. Try again later.</p>
+                )}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={fetchFutureYou}
+                    className="text-[14px] text-[#171717] bg-[#F2F2F4] px-4 py-2 rounded-lg font-semibold hover:bg-[#E8E8EC] active:bg-[#DDDEE3] disabled:opacity-60"
+                    disabled={isLoadingFutureYou}
+                  >
+                    {isLoadingFutureYou ? 'Generating…' : 'Generate'}
+                  </button>
+                  <button
+                    onClick={collapseFutureYouSection}
+                    className="text-[14px] text-[#525252] font-semibold"
+                  >
+                    Not now
+                  </button>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
       </div>
     </motion.div>
   );

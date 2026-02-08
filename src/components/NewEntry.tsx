@@ -193,7 +193,7 @@ export function NewEntry({ onSave, onCancel, existingEntry }: NewEntryProps) {
         {/* Journal Prompt */}
         <div className="text-center py-2">
           <p className="text-[13px] text-[#A3A3A3] italic">
-            💡 {currentPrompt}
+            Write freely.
           </p>
         </div>
       </div>

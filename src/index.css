@@ -41,6 +41,51 @@
   }
 }
 
+@keyframes futureyou-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-futureyou-enter {
+  animation: futureyou-enter 220ms ease-out;
+}
+
+@keyframes futureyou-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+.animate-futureyou-exit {
+  animation: futureyou-exit 320ms ease-out forwards;
+}
+
+@keyframes futureyou-enter-right {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-futureyou-enter-right {
+  animation: futureyou-enter-right 280ms ease-out;
+}
+
 @layer theme {
   :root, :host {
     --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";

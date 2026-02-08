@@ -1,7 +1,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
-import { callOpenAIInsightsRaw, parseOpenAIInsights, OPENAI_MODEL } from '../utils/ai';
+import { callOpenAIInsightsRaw, callOpenAIFutureYou, parseOpenAIInsights, OPENAI_MODEL } from '../utils/ai';
 
 const prisma = new PrismaClient();
 const router = express.Router();
@@ -14,30 +14,37 @@ interface AIResponse {
   weeklySummary?: string;
   moodDrivers?: string[];
   patterns?: string[];
-  notableMoments?: Array<{ moment: string; whyItMatters: string }>;
-  suggestions?: string[];
   confidence?: number;
   sourceEntryCount?: number;
   range?: { days: number };
   error?: string;
   isFallback?: boolean;
+  futureYouMessage?: string;
 }
 
-// POST /insights/ai/last7 - AI-powered insights for last 7 entries
-router.post('/ai/last7', async (req, res) => {
+
+// POST /insights/ai - AI-powered insights
+const handleInsightsAI = async (req: express.Request, res: express.Response) => {
   let entriesForAIValidated: Array<{ date: string; mood?: string; text: string }> = [];
   let combinedTextLength = 0;
   let forceGenerate = false;
   let cacheReason = 'miss:no_cache';
   const isDev = process.env.NODE_ENV !== 'production';
+  let mode = '';
   try {
     const apiKey = process.env.OPENAI_API_KEY;
-    const forceParam = req.query?.force ?? req.body?.force;
+    const forceParam = req.body?.force;
+    mode = String(req.body?.mode ?? 'weekly').toLowerCase();
+    const isFutureYou = mode === 'future_you';
     forceGenerate = String(forceParam || '').toLowerCase() === 'true' || String(forceParam || '') === '1';
-    console.log('INSIGHTS_AI_LAST7_HIT');
+    console.log('INSIGHTS_AI_HIT');
     console.log('FORCE:', forceGenerate);
+    console.log('MODE:', mode || 'weekly');
+    if (isFutureYou) {
+      console.log('[FutureYou] mode detected');
+    }
     console.log('INSIGHTS_REQUEST_RECEIVED');
-    console.log('[Insights] POST /ai/last7 called. OPENAI_KEY_PRESENT:', !!apiKey);
+    console.log('[Insights] POST /ai called. OPENAI_KEY_PRESENT:', !!apiKey);
     console.log('OPENAI_ENV_VAR_USED:', 'OPENAI_API_KEY');
     console.log('OPENAI_KEY_PREFIX:', apiKey ? apiKey.slice(0, 3) : '');
     console.log('MODEL_USED:', OPENAI_MODEL);
@@ -120,16 +127,7 @@ router.post('/ai/last7', async (req, res) => {
       console.log('AI_CALLED:', false);
       console.log('PARSE_OK:', false);
       console.log('RETURNING_FALLBACK:', false, 'reason=no_entries');
-      return res.status(200).json({
-        howYouFelt: 'No insights available yet.',
-        weeklySummary: '',
-        moodDrivers: [],
-        patterns: [],
-        suggestions: [],
-        confidence: 0,
-        sourceEntryCount: 0,
-        isFallback: false,
-      } as AIResponse);
+      return res.status(200).json({ error: 'NO_ENTRIES' });
     }
 
     console.log('INSIGHTS: Ready to call Gemini AI with', entriesForAIValidated.length, 'entries');
@@ -237,7 +235,7 @@ router.post('/ai/last7', async (req, res) => {
     const latestEntryAt = sortedEntries[sortedEntries.length - 1]?.date;
 
     // Cache lookup
-    if (userId && !forceGenerate) {
+    if (userId && !forceGenerate && !isFutureYou) {
       try {
         const cache = await prisma.insightCache.findUnique({ where: { userId } });
         if (cache) {
@@ -277,7 +275,7 @@ router.post('/ai/last7', async (req, res) => {
       } catch (err: any) {
         console.warn('INSIGHTS: Cache lookup failed:', err?.message || err);
       }
-    } else if (!forceGenerate) {
+    } else if (!forceGenerate && !isFutureYou) {
       const anonKey = 'anon';
       const cached = aiResultCache[anonKey];
       if (cached) {
@@ -304,22 +302,7 @@ router.post('/ai/last7', async (req, res) => {
     console.log('CACHE_HIT:', false);
     console.log('CACHE_REASON:', cacheReason);
 
-    // If not enough data and not forced, return a non-AI message (not a fallback)
-    if (!shouldGenerateAI) {
-      console.log('AI_CALLED:', false);
-      console.log('PARSE_OK:', false);
-      console.log('RETURNING_FALLBACK:', false, 'reason=insufficient_entries');
-      return res.status(200).json({
-        howYouFelt: 'No insights available yet.',
-        weeklySummary: '',
-        moodDrivers: [],
-        patterns: [],
-        suggestions: [],
-        confidence: 0,
-        sourceEntryCount: entriesForAIValidated.length,
-        isFallback: false,
-      } as AIResponse);
-    }
+    // Always run AI when we have any entries (no low-data early return)
 
     // Call OpenAI
     try {
@@ -336,24 +319,38 @@ router.post('/ai/last7', async (req, res) => {
         });
       }
 
-      if (!forceGenerate && combinedTextLength < 20) {
-        console.log('AI_CALLED:', false);
-        console.log('PARSE_OK:', false);
-        console.log('RETURNING_FALLBACK:', false, 'reason=combined_text_too_short');
-        return res.status(200).json({
-          howYouFelt: 'Based on a small number of recent entries, there is not enough written detail to generate deeper AI insights yet.',
-          weeklySummary: 'Add a bit more detail in your next entries to unlock richer reflections.',
-          moodDrivers: Object.keys(moodDistribution).slice(0, 3),
-          patterns: mostWrittenDayAndTime ? [`Most writing: ${mostWrittenDayAndTime}`] : [],
-          suggestions: ['Add one or two sentences next time'],
-          confidence: 0.2,
-          sourceEntryCount: entriesForAIValidated.length,
-          isFallback: false,
-        } as AIResponse);
-      }
-
       console.log('OPENAI_CALL_START');
       console.log('AI_CALLED:', true);
+
+      if (isFutureYou) {
+        console.log('[FutureYou] entries count:', entriesForAIValidated.length);
+        const combinedSummary = combinedText.replace(/\s+/g, ' ').trim().slice(0, 1200);
+        const fallbackSummary =
+          combinedSummary ||
+          entriesForAIValidated
+            .slice(0, 7)
+            .map((e) => `${new Date(e.date).toISOString().slice(0, 10)}${e.mood ? ` [${e.mood}]` : ''}`)
+            .join(', ');
+        const futureInput = {
+          days: 7,
+          entryCount: entriesForAIValidated.length,
+          moodDistributionJson: JSON.stringify(moodDistribution),
+          entriesSummary: fallbackSummary || '(no text)',
+          limitedDataNote,
+        };
+        console.log('[FutureYou] OpenAI called');
+        try {
+          const futureYou = await callOpenAIFutureYou(futureInput as any, apiKey);
+          console.log('[FutureYou] response sent');
+          return res.status(200).json({ futureYouMessage: futureYou });
+        } catch (err: any) {
+          const errMsg = err?.message || 'Future You generation failed';
+          console.error('AI_ERROR', err);
+          console.log('[FutureYou] response sent');
+          return res.status(200).json({ futureYouMessage: 'This reflection is based on a small snapshot of recent entries. Even so, it’s clear you’re processing something meaningful. Be gentle with yourself today.' });
+        }
+      }
+
       const { rawText, parsed } = await callOpenAIInsightsRaw(aiInput as any, apiKey);
       console.log('AI_SUCCESS');
       const rawPreview = rawText.slice(0, 200);
@@ -365,9 +362,8 @@ router.post('/ai/last7', async (req, res) => {
       const responsePayload: AIResponse = {
         howYouFelt: (ai?.howYouFelt || '').trim(),
         weeklySummary: ai?.weeklySummary || '',
-        moodDrivers: ai?.moodDrivers || [],
-        patterns: ai?.patterns || [],
-        suggestions: ai?.suggestions || [],
+        moodDrivers: Array.isArray(ai?.moodDrivers) ? ai.moodDrivers : [],
+        patterns: Array.isArray(ai?.patterns) ? ai.patterns : [],
         confidence: ai?.confidence ?? 0.5,
         sourceEntryCount: entriesForAIValidated.length,
         isFallback: false,
@@ -409,6 +405,13 @@ router.post('/ai/last7', async (req, res) => {
       console.log('ERROR_CODE:', err?.code || errName);
       console.log('ERROR_MESSAGE:', errMsg);
       console.log('PARSE_OK:', false);
+
+      if (isFutureYou) {
+        console.log('[FutureYou] response sent');
+        return res.status(200).json({
+          futureYouMessage: 'This reflection is based on a small snapshot of recent entries. Even so, it’s clear you’re processing something meaningful. Be gentle with yourself today.',
+        });
+      }
 
       // A) Missing API key
       if (!apiKey) {
@@ -471,12 +474,20 @@ router.post('/ai/last7', async (req, res) => {
     console.log('AI_CALLED:', false);
     console.log('PARSE_OK:', false);
     console.log('RETURNING_FALLBACK:', false, 'reason=handler_error');
+    if (typeof mode !== 'undefined' && String(mode).toLowerCase() === 'future_you') {
+      console.log('[FutureYou] response sent');
+      return res.status(200).json({
+        futureYouMessage: 'This reflection is based on a small snapshot of recent entries. Even so, it’s clear you’re processing something meaningful. Be gentle with yourself today.',
+      });
+    }
     return res.status(500).json({
       error: 'Unexpected server error',
       message: isDev ? errMsg : 'Unexpected server error',
       stack: isDev ? err?.stack : undefined,
     });
   }
-});
+};
+
+router.post('/ai', handleInsightsAI);
 
 export default router;
