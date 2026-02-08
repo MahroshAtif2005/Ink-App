@@ -72,20 +72,64 @@ export default function App() {
   useEffect(() => {
     saveEntriesToStorage(entries);
   }, [entries]);
-  const handleNewEntry = (entry: Omit<JournalEntry, 'id' | 'createdAt'>) => {
+  const handleNewEntry = async (entry: Omit<JournalEntry, 'id' | 'createdAt'>) => {
     const newEntry: JournalEntry = {
       ...entry,
       id: Date.now().toString(),
       createdAt: new Date(),
     };
+    
+    // Save to localStorage
     setEntries([newEntry, ...entries]);
+    
+    // Save to backend database
+    const token = localStorage.getItem('authToken');
+    if (token) {
+      try {
+        await fetch('/api/entries', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            content: entry.content,
+            moodEmoji: entry.mood,
+            createdAt: newEntry.createdAt.toISOString(),
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to save entry to backend:', err);
+      }
+    }
+    
     setCurrentScreen('home');
   };
 
-  const handleUpdateEntry = (updatedEntry: JournalEntry) => {
+  const handleUpdateEntry = async (updatedEntry: JournalEntry) => {
     setEntries(entries.map((entry: JournalEntry) => 
       entry.id === updatedEntry.id ? updatedEntry : entry
     ));
+    
+    // Save to backend database
+    const token = localStorage.getItem('authToken');
+    if (token) {
+      try {
+        await fetch(`/api/entries/${updatedEntry.id}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            content: updatedEntry.content,
+            moodEmoji: updatedEntry.mood,
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to update entry on backend:', err);
+      }
+    }
   };
 
   return (

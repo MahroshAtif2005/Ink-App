@@ -1,12 +1,186 @@
 import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown, Repeat, BarChart3, Hash, Calendar as CalendarIcon } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import type { JournalEntry } from '../App';
 
 interface InsightsProps {
   entries: JournalEntry[];
 }
 
+interface AIResponse {
+  howYouFelt?: string;
+  weeklySummary?: string;
+  moodDrivers?: string[];
+  patterns?: string[];
+  notableMoments?: Array<{ moment: string; whyItMatters: string }>;
+  suggestions?: string[];
+  confidence?: number;
+  sourceEntryCount?: number;
+  range?: { days: number };
+  error?: string;
+  isFallback?: boolean;
+}
+
 export function Insights({ entries }: InsightsProps) {
+  const [aiData, setAiData] = useState<AIResponse | null>(null);
+  const [howYouFeltText, setHowYouFeltText] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Load cached insight (if fresh)
+    try {
+      const cached = localStorage.getItem('ink_ai_insight');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        const ageMs = Date.now() - (parsed?.timestamp || 0);
+        if (ageMs < 24 * 60 * 60 * 1000 && parsed?.howYouFelt) {
+          setHowYouFeltText(parsed.howYouFelt);
+          setAiData(parsed?.aiData || null);
+        }
+      }
+    } catch {
+      // ignore cache errors
+    }
+  }, []);
+
+  const fetchAIInsights = async () => {
+    const token = localStorage.getItem('authToken');
+
+    console.log('[Insights] fetchAIInsights started. Entries count:', entries.length);
+    setIsGenerating(true);
+    setGenerateError(null);
+
+    try {
+      const apiBase = (import.meta as any)?.env?.VITE_API_BASE_URL || '';
+      const apiUrl = apiBase ? `${apiBase}/insights/ai/last7?force=true` : '/api/insights/ai/last7?force=true';
+      console.log('[Insights] AI request sent to', apiUrl);
+      
+      const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const payloadEntries = entries.map((e) => ({
+        createdAt: e.date.toISOString(),
+        content: e.content,
+        mood: e.mood,
+        moodEmoji: e.mood,
+      }));
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ entries: payloadEntries }),
+      });
+      console.log('[Insights] AI response received, status:', response.status);
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        console.error('[Insights] AI error response:', errorData);
+        // Don't display HTTP error text; show placeholder instead
+        setGenerateError('Couldn’t generate insights right now. Try again.');
+        setIsGenerating(false);
+        return;
+      }
+
+      const data = await response.json();
+      console.log('[Insights] Parsed AI data:', data);
+
+      const normalized =
+        data?.howYouFelt ? data
+        : data?.insight ? data.insight
+        : data?.data ? data.data
+        : data?.result ? data.result
+        : null;
+
+      const normalizedData = normalized
+        ? {
+            howYouFelt: normalized?.howYouFelt ?? '',
+            weeklySummary: normalized?.weeklySummary ?? '',
+            moodDrivers: Array.isArray(normalized?.moodDrivers) ? normalized.moodDrivers : [],
+            patterns: Array.isArray(normalized?.patterns) ? normalized.patterns : [],
+            suggestions: Array.isArray(normalized?.suggestions) ? normalized.suggestions : [],
+            confidence: typeof normalized?.confidence === 'number' ? normalized.confidence : 0.4,
+            sourceEntryCount: typeof normalized?.sourceEntryCount === 'number' ? normalized.sourceEntryCount : undefined,
+            isFallback: typeof normalized?.isFallback === 'boolean' ? normalized.isFallback : undefined,
+          }
+        : null;
+
+      if (normalizedData) {
+        setAiData(normalizedData);
+        setHowYouFeltText(normalizedData.howYouFelt);
+        setGenerateError(null);
+        try {
+          localStorage.setItem('ink_ai_insight', JSON.stringify({ howYouFelt: normalizedData.howYouFelt, aiData: normalizedData, timestamp: Date.now() }));
+        } catch {
+          // ignore cache errors
+        }
+      } else {
+        setAiData(null);
+        setHowYouFeltText('');
+        setGenerateError('Couldn’t generate insights right now. Try again.');
+      }
+
+      // If backend reports zero entries but there are local entries, retry by posting them
+      if ((normalizedData?.sourceEntryCount === 0 || normalizedData?.sourceEntryCount === undefined) && entries.length > 0) {
+        try {
+          const payloadEntries = entries.map((e) => ({
+            createdAt: e.date.toISOString(),
+            content: e.content,
+            mood: e.mood,
+            moodEmoji: e.mood,
+          }));
+          console.log('[Insights] No backend entries; retrying with localStorage entries, count=', payloadEntries.length);
+          const retryResp = await fetch(apiUrl, { method: 'POST', headers, body: JSON.stringify({ entries: payloadEntries }) });
+          if (retryResp.ok) {
+            const retryData = await retryResp.json();
+            console.log('[Insights] Retry AI response:', retryData);
+            const retryNormalized =
+              retryData?.howYouFelt ? retryData
+              : retryData?.insight ? retryData.insight
+              : retryData?.data ? retryData.data
+              : retryData?.result ? retryData.result
+              : null;
+            const retryNormalizedData = retryNormalized
+              ? {
+                  howYouFelt: retryNormalized?.howYouFelt ?? '',
+                  weeklySummary: retryNormalized?.weeklySummary ?? '',
+                  moodDrivers: Array.isArray(retryNormalized?.moodDrivers) ? retryNormalized.moodDrivers : [],
+                  patterns: Array.isArray(retryNormalized?.patterns) ? retryNormalized.patterns : [],
+                  suggestions: Array.isArray(retryNormalized?.suggestions) ? retryNormalized.suggestions : [],
+                  confidence: typeof retryNormalized?.confidence === 'number' ? retryNormalized.confidence : 0.4,
+                  sourceEntryCount: typeof retryNormalized?.sourceEntryCount === 'number' ? retryNormalized.sourceEntryCount : undefined,
+                  isFallback: typeof retryNormalized?.isFallback === 'boolean' ? retryNormalized.isFallback : undefined,
+                }
+              : null;
+            if (retryNormalizedData) {
+              setAiData(retryNormalizedData);
+              setHowYouFeltText(retryNormalizedData.howYouFelt);
+              setGenerateError(null);
+              try {
+                localStorage.setItem('ink_ai_insight', JSON.stringify({ howYouFelt: retryNormalizedData.howYouFelt, aiData: retryNormalizedData, timestamp: Date.now() }));
+              } catch {
+                // ignore cache errors
+              }
+            }
+          } else {
+            console.warn('[Insights] Retry AI call failed:', retryResp.statusText);
+          }
+        } catch (err) {
+          console.error('[Insights] Local fallback AI call failed:', err);
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to fetch insights';
+      console.error('[Insights] AI fetch error:', message);
+      setGenerateError('Couldn’t generate insights right now. Try again.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleGenerateInsight = () => {
+    console.log('[Insights] Generate Insight clicked.');
+    fetchAIInsights();
+  };
   // Get mood counts and percentages
   const getMoodCounts = () => {
     const counts: Record<string, number> = {};
@@ -157,18 +331,18 @@ export function Insights({ entries }: InsightsProps) {
         Insights
       </h1>
 
-      {entries.length === 0 ? (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-          className="flex flex-col items-center justify-center py-16 text-center"
-        >
-          <p className="text-[17px] text-[#525252] mb-4">No data yet</p>
-          <p className="text-[15px] text-[#A3A3A3]">Create some entries to see insights about your moods and themes.</p>
-        </motion.div>
-      ) : (
-        <div className="space-y-4">
+      <div className="space-y-4">
+        {entries.length === 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="flex flex-col items-center justify-center py-8 text-center"
+          >
+            <p className="text-[17px] text-[#525252] mb-2">No data yet</p>
+            <p className="text-[15px] text-[#A3A3A3]">Create some entries to see insights about your moods and themes.</p>
+          </motion.div>
+        )}
         {/* Weekly Digest Card */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -203,7 +377,7 @@ export function Insights({ entries }: InsightsProps) {
           </button>
         </motion.div>
 
-        {/* How You Felt - Placeholder */}
+        {/* How You Felt - AI Powered */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -212,9 +386,64 @@ export function Insights({ entries }: InsightsProps) {
         >
           <h3 className="text-[17px] font-semibold mb-3 text-[#171717]">How You Felt</h3>
           <div className="bg-[#FAFAF9] border border-[#E5E5E5] rounded-lg p-4">
-            <p className="text-[15px] text-[#A3A3A3] italic leading-relaxed">
-              AI-generated weekly summary coming soon. We'll analyze your entries to give you insights into your emotional journey this week.
-            </p>
+            {/* No entries → show "create more entries..." */}
+            {isGenerating ? (
+              <div className="space-y-2">
+                <p className="text-[15px] text-[#A3A3A3] italic">Generating your weekly reflection...</p>
+              </div>
+            ) : howYouFeltText ? (
+              <div className="space-y-3">
+                <p className="text-[15px] text-[#171717] leading-relaxed">{howYouFeltText}</p>
+                {aiData?.weeklySummary && (
+                  <p className="text-[14px] text-[#525252] leading-relaxed">
+                    <span className="font-semibold text-[#171717]">Summary:</span> {aiData.weeklySummary}
+                  </p>
+                )}
+                {aiData?.moodDrivers && aiData.moodDrivers.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-[#E5E5E5]">
+                    <p className="text-[14px] font-semibold text-[#171717] mb-2">Key Drivers:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {aiData.moodDrivers.map((driver, idx) => (
+                        <span key={idx} className="text-[13px] bg-[#E5E5E5] text-[#171717] px-3 py-1 rounded-full">
+                          {driver}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {aiData?.suggestions && Array.isArray(aiData.suggestions) && aiData.suggestions.some((s: any) => s) && (
+                  <div className="mt-3 pt-3 border-t border-[#E5E5E5]">
+                    <p className="text-[14px] font-semibold text-[#171717] mb-2">Suggestions:</p>
+                    <ul className="space-y-1">
+                      {aiData.suggestions.filter((s: any) => s).map((suggestion: any, idx: any) => (
+                        <li key={idx} className="text-[14px] text-[#525252]">• {suggestion}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <button
+                  onClick={handleGenerateInsight}
+                  className="mt-3 text-[14px] text-[#007AFF] font-semibold self-start active:opacity-60 transition-opacity"
+                >
+                  Regenerate
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {generateError ? (
+                  <p className="text-[15px] text-[#A3A3A3] italic">Couldn’t generate insights right now. Try again.</p>
+                ) : (
+                  <p className="text-[15px] text-[#A3A3A3] italic">Tap to generate a deeper 7-day AI insight from your journal.</p>
+                )}
+                <button
+                  onClick={handleGenerateInsight}
+                  disabled={isGenerating}
+                  className="text-[15px] text-[#007AFF] font-semibold active:opacity-60 transition-opacity disabled:opacity-50"
+                >
+                  {isGenerating ? 'Generating…' : 'Generate Insight'}
+                </button>
+              </div>
+            )}
           </div>
         </motion.div>
 
@@ -348,7 +577,6 @@ export function Insights({ entries }: InsightsProps) {
           </button>
         </motion.div>
       </div>
-      )}
     </motion.div>
   );
 }
