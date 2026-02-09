@@ -1,13 +1,19 @@
 # Ink
 ### Journal, reimagined.
 
-Across technology, the products people trust most aren’t winning by doing *more* — they’re winning by doing **one thing intentionally well**.
+## Design Philosophy
 
-- **Apple Watch** didn’t win because it became a phone on your wrist. It won by focusing on **health** and integrating quietly into daily life.
-- **WHOOP** went further by **removing the screen entirely** — no notifications, no distraction — just recovery, strain, and sleep interpreted clearly.
-- **Phone cameras** replaced many “digital cameras” not by being complex, but by being **effortless, always available, and good enough**.
+Across technology, the products people trust most aren’t winning by doing more — they’re winning by doing **one thing intentionally well**.
 
-At the same time, people are returning to simpler tools — paper planners, physical notebooks, e-ink readers — not out of nostalgia, but because they reduce noise and help focus.
+**WHOOP** chose to remove the screen entirely. No notifications, no apps — just recovery, strain, and sleep interpreted clearly. That restraint is exactly why people prefer it.
+
+Many creators still choose **dedicated or physical cameras** over phone cameras, not for convenience, but for focus, control, and intentional use.
+
+In both cases, the value comes from what the product *doesn’t* try to be.
+
+We believe journaling works best the same way.
+
+At the same time, people continue to choose simpler tools — paper planners, physical notebooks, and e-ink readers — not out of nostalgia, but because they reduce noise and help sustain focus.
 
 **The pattern is consistent:**
 > Do fewer things, but do the right one extremely well.
