@@ -41,3 +41,5 @@ Writing comes first. Insight comes later.
 This philosophy extends beyond software: Ink is designed to evolve into a **thin, premium e-ink journal device** — a calm tool you pick up to write, not to scroll. A modern “physical journal” that preserves the ritual of writing while keeping the benefits of digital.
 
 ### Built by Team Ink for the AI Agent Innovation Hackathon
+### Demo video link : https://youtu.be/fVJ5hXlotmc?si=2qkNv2jpNIlWMCkd 
+
